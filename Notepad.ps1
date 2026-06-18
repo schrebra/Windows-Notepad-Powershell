@@ -2,7 +2,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 #region ==================== CONSTANTS ====================
-$script:APP_NAME = "Notepad"; $script:APP_VERSION = "5.0.0"
+$script:APP_NAME = "Notepad"; $script:APP_VERSION = "5.0.1"
 $script:SETTINGS_FOLDER = "Notepad"; $script:SETTINGS_FILE = "settings.ini"
 $script:MIN_WINDOW_W = 400; $script:MIN_WINDOW_H = 300; $script:MAX_WINDOW_W = 3840; $script:MAX_WINDOW_H = 2160
 $script:DEF_WINDOW_W = 900; $script:DEF_WINDOW_H = 650
@@ -18,11 +18,50 @@ $script:ENCODINGS = [ordered]@{
     "UTF-16 LE (no BOM)" = [System.Text.UnicodeEncoding]::new($false,$false); "UTF-16 BE (no BOM)" = [System.Text.UnicodeEncoding]::new($true,$false)
     "UTF-32 LE (BOM)" = [System.Text.UTF32Encoding]::new($false,$true); "UTF-32 BE (BOM)" = [System.Text.UTF32Encoding]::new($true,$true)
 }
-$script:StatusUpdatePending = $false; $script:StatusUpdateTimer = $null
+$script:StatusUpdatePending = $false; $script:StatusUpdateTimer = $null; $script:AppIcon = $null
 #endregion
 #region ==================== ASSEMBLIES ====================
 try { foreach ($asm in @("PresentationFramework","PresentationCore","WindowsBase","System.Windows.Forms","System.Drawing")) { Add-Type -AssemblyName $asm -ErrorAction Stop } }
 catch { $null = [System.Windows.Forms.MessageBox]::Show("Failed to load assembly: $($_.Exception.Message)","Fatal Error",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Error); exit 1 }
+#endregion
+#region ==================== ICON EXTRACTION ====================
+try { Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class IconHelper {
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    static extern int SHDefExtractIcon(string pszIconFile, int iIndex, uint uFlags, out IntPtr phiconLarge, out IntPtr phiconSmall, uint nIconSize);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DestroyIcon(IntPtr hIcon);
+    public static IntPtr ExtractSized(string path, int index, int largeSize, int smallSize) {
+        IntPtr hLarge, hSmall;
+        uint packed = (uint)((smallSize << 16) | (largeSize & 0xFFFF));
+        int hr = SHDefExtractIcon(path, index, 0, out hLarge, out hSmall, packed);
+        if (hSmall != IntPtr.Zero) DestroyIcon(hSmall);
+        if (hr == 0 && hLarge != IntPtr.Zero) return hLarge;
+        return IntPtr.Zero;
+    }
+}
+"@ -ErrorAction SilentlyContinue } catch {}
+function script:ExtractNotepadIcon {
+    $paths = @((Join-Path $env:SystemRoot "System32\notepad.exe"),(Join-Path $env:SystemRoot "notepad.exe"),(Join-Path ${env:ProgramFiles} "Windows NT\Accessories\notepad.exe"))
+    foreach ($size in @(48, 64, 256, 32)) {
+        foreach ($p in $paths) {
+            if (-not (Test-Path $p -PathType Leaf)) { continue }
+            try {
+                $hIcon = [IconHelper]::ExtractSized($p, 0, $size, 16)
+                if ($hIcon -ne [IntPtr]::Zero) {
+                    $bmp = [System.Windows.Interop.Imaging]::CreateBitmapSourceFromHIcon($hIcon, [System.Windows.Int32Rect]::Empty, [System.Windows.Media.Imaging.BitmapSizeOptions]::FromEmptyOptions())
+                    [IconHelper]::DestroyIcon($hIcon) | Out-Null
+                    $bmp.Freeze(); return $bmp
+                }
+            } catch {}
+        }
+    }
+    return $null
+}
+$script:AppIcon = ExtractNotepadIcon
 #endregion
 #region ==================== STATE ====================
 $script:State = @{ FilePath = ""; IsModified = $false; FindText = ""; FindCase = $false; LineEnding = "CRLF"; Encoding = "UTF-8"; ZoomLevel = $script:DEF_ZOOM; BaseFontSize = [double]$script:DEF_FONT_SIZE; BaseLineSpacing = [double]$script:DEF_SPACING; SettingsDir = Join-Path $env:APPDATA $script:SETTINGS_FOLDER; SettingsFile = Join-Path (Join-Path $env:APPDATA $script:SETTINGS_FOLDER) $script:SETTINGS_FILE }
@@ -35,6 +74,7 @@ function script:ToInt([string]$T,[int]$D) { if ([string]::IsNullOrWhiteSpace($T)
 function script:ToBool([string]$T,[bool]$D) { if ([string]::IsNullOrWhiteSpace($T)) { return $D }; switch ($T.Trim().ToLower()) { "true" { return $true } "1" { return $true } "false" { return $false } "0" { return $false } default { return $D } } }
 function script:TestFont([string]$Name) { if ([string]::IsNullOrWhiteSpace($Name)) { return $false }; try { foreach ($f in [System.Windows.Media.Fonts]::SystemFontFamilies) { if ($f.Source -eq $Name) { return $true } } } catch {}; $false }
 function script:EolDisplayLabel([string]$Eol) { switch ($Eol) { "CRLF" { return "Windows (CRLF)" } "LF" { return "Unix (LF)" } "CR" { return "Macintosh (CR)" } default { return "Windows (CRLF)" } } }
+function script:ApplyIcon([System.Windows.Window]$w) { if ($null -ne $script:AppIcon -and $null -ne $w) { try { $w.Icon = $script:AppIcon } catch {} } }
 #endregion
 #region ==================== ENCODING DETECTION ====================
 function script:DetectEncoding([string]$FilePath) {
@@ -124,8 +164,7 @@ function script:ApplyZoom {
     $factor = [double]$script:State.ZoomLevel / 100.0
     $newSize = Clamp ([double]$script:State.BaseFontSize * $factor) 4.0 200.0
     $script:UI.txtEditor.FontSize = $newSize
-    ApplyLineSpacingToEditor
-    UpdateZoomDisplay; UpdateZoomMenuState
+    ApplyLineSpacingToEditor; UpdateZoomDisplay; UpdateZoomMenuState
 }
 function script:ZoomIn { $script:State.ZoomLevel = [Math]::Min($script:MAX_ZOOM, $script:State.ZoomLevel + $script:ZOOM_STEP); ApplyZoom }
 function script:ZoomOut { $script:State.ZoomLevel = [Math]::Max($script:MIN_ZOOM, $script:State.ZoomLevel - $script:ZOOM_STEP); ApplyZoom }
@@ -194,6 +233,7 @@ function script:UpdateZoomDisplay { try { $script:UI.txtZoom.Text = "$($script:S
 #region ==================== INIT WINDOW ====================
 try { $reader = [System.Xml.XmlNodeReader]::new($script:Xaml); $script:Window = [System.Windows.Markup.XamlReader]::Load($reader); $reader.Dispose() }
 catch { $null = [System.Windows.MessageBox]::Show("XAML load failed: $($_.Exception.Message)","Fatal Error","OK","Error"); exit 1 }
+ApplyIcon $script:Window
 $script:ControlNames = @("txtEditor","txtPos","txtWords","txtChars","txtLines","txtEnc","txtEol","txtZoom","statusBar","statusBorder","menuBar","mnuNew","mnuOpen","mnuSave","mnuSaveAs","mnuExit","mnuUndo","mnuRedo","mnuCut","mnuCopy","mnuPaste","mnuDelete","mnuFind","mnuFindNext","mnuReplace","mnuSelAll","mnuDate","mnuWordWrap","mnuFont","mnuEditorCfg","mnuStatusBar","mnuZoomIn","mnuZoomOut","mnuZoomReset","mnuLineEndings","mnuEolCRLF","mnuEolLF","mnuEolCR","mnuEncoding","mnuEncUtf8","mnuEncUtf8Bom","mnuEncUtf16LE","mnuEncUtf16BE")
 foreach ($n in $script:ControlNames) { $c = $script:Window.FindName($n); if ($null -eq $c) { $null = [System.Windows.MessageBox]::Show("Missing control: $n","Fatal Error","OK","Error"); exit 1 }; $script:UI[$n] = $c }
 try {
@@ -326,6 +366,7 @@ function script:ShowFindDlg {
     $d.WindowStartupLocation = "CenterOwner"; $d.Owner = $script:Window; $d.ResizeMode = "NoResize"
     $d.ShowInTaskbar = $false; $d.WindowStyle = "ToolWindow"
     $d.Background = [System.Windows.Media.BrushConverter]::new().ConvertFrom($script:COLOR_CHROME)
+    ApplyIcon $d
     $g = [System.Windows.Controls.Grid]::new(); $g.Margin = [System.Windows.Thickness]::new(15)
     $null = $g.RowDefinitions.Add([System.Windows.Controls.RowDefinition]::new())
     $null = $g.RowDefinitions.Add([System.Windows.Controls.RowDefinition]::new())
@@ -349,6 +390,7 @@ function script:ShowReplaceDlg {
     $d.WindowStartupLocation = "CenterOwner"; $d.Owner = $script:Window; $d.ResizeMode = "NoResize"
     $d.ShowInTaskbar = $false; $d.WindowStyle = "ToolWindow"
     $d.Background = [System.Windows.Media.BrushConverter]::new().ConvertFrom($script:COLOR_CHROME)
+    ApplyIcon $d
     $g = [System.Windows.Controls.Grid]::new(); $g.Margin = [System.Windows.Thickness]::new(15)
     for ($i = 0; $i -lt 4; $i++) { $null = $g.RowDefinitions.Add([System.Windows.Controls.RowDefinition]::new()) }
     foreach ($cw in @("Auto","1*","Auto")) { $cd = [System.Windows.Controls.ColumnDefinition]::new(); $cd.Width = if ($cw -eq "1*") { [System.Windows.GridLength]::new(1,"Star") } else { [System.Windows.GridLength]::Auto }; $g.ColumnDefinitions.Add($cd) }
@@ -391,6 +433,7 @@ function script:ShowEditorCfg {
     $d.WindowStartupLocation = "CenterOwner"; $d.Owner = $script:Window; $d.ResizeMode = "NoResize"
     $d.ShowInTaskbar = $false; $d.WindowStyle = "SingleBorderWindow"
     $d.Background = [System.Windows.Media.BrushConverter]::new().ConvertFrom($script:COLOR_CHROME)
+    ApplyIcon $d
     $outerBorder = [System.Windows.Controls.Border]::new(); $outerBorder.Padding = [System.Windows.Thickness]::new(14,12,14,12); $outerBorder.MinWidth = 290
     $stack = [System.Windows.Controls.StackPanel]::new()
     $curMargin = $script:UI.txtEditor.Margin; $curSpacing = [double]$script:State.BaseLineSpacing
@@ -477,5 +520,5 @@ $script:Window.Add_Closing({ param($sender,$e); if (-not (ConfirmSave)) { $e.Can
 #region ==================== RUN ====================
 $null = $script:Window.ShowDialog()
 try { $script:StatusUpdateTimer.Stop() } catch {}; $script:StatusUpdateTimer = $null
-$script:State = $null; $script:UI = $null; $script:Settings = $null; $script:Window = $null
+$script:State = $null; $script:UI = $null; $script:Settings = $null; $script:Window = $null; $script:AppIcon = $null
 #endregion
