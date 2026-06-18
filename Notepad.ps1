@@ -2,7 +2,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 #region ==================== CONSTANTS ====================
-$script:APP_NAME = "Notepad"; $script:APP_VERSION = "4.0.5"
+$script:APP_NAME = "Notepad"; $script:APP_VERSION = "5.0.0"
 $script:SETTINGS_FOLDER = "Notepad"; $script:SETTINGS_FILE = "settings.ini"
 $script:MIN_WINDOW_W = 400; $script:MIN_WINDOW_H = 300; $script:MAX_WINDOW_W = 3840; $script:MAX_WINDOW_H = 2160
 $script:DEF_WINDOW_W = 900; $script:DEF_WINDOW_H = 650
@@ -11,21 +11,21 @@ $script:MIN_MARGIN = 0; $script:MAX_MARGIN = 200; $script:DEF_MARGIN = 0
 $script:MIN_SPACING = 1.0; $script:MAX_SPACING = 3.0; $script:DEF_SPACING = 1.2
 $script:MIN_ZOOM = 10; $script:MAX_ZOOM = 500; $script:DEF_ZOOM = 100; $script:ZOOM_STEP = 10
 $script:COLOR_CHROME = "#F0F0F0"; $script:COLOR_EDITOR_BG = "#FFFFFF"; $script:COLOR_EDITOR_FG = "#1E1E1E"
-$script:COLOR_FIND_BG = "#FFFF00"; $script:COLOR_FIND_FG = "#000000"
+$script:COLOR_FIND_BG = "#FFFF00"
 $script:ENCODINGS = [ordered]@{
     "UTF-8 (no BOM)" = [System.Text.UTF8Encoding]::new($false); "UTF-8 (BOM)" = [System.Text.UTF8Encoding]::new($true)
     "UTF-16 LE (BOM)" = [System.Text.UnicodeEncoding]::new($false,$true); "UTF-16 BE (BOM)" = [System.Text.UnicodeEncoding]::new($true,$true)
     "UTF-16 LE (no BOM)" = [System.Text.UnicodeEncoding]::new($false,$false); "UTF-16 BE (no BOM)" = [System.Text.UnicodeEncoding]::new($true,$false)
     "UTF-32 LE (BOM)" = [System.Text.UTF32Encoding]::new($false,$true); "UTF-32 BE (BOM)" = [System.Text.UTF32Encoding]::new($true,$true)
 }
-$script:StatusUpdateTimer = $null; $script:StatusUpdatePending = $false
+$script:StatusUpdatePending = $false; $script:StatusUpdateTimer = $null
 #endregion
 #region ==================== ASSEMBLIES ====================
 try { foreach ($asm in @("PresentationFramework","PresentationCore","WindowsBase","System.Windows.Forms","System.Drawing")) { Add-Type -AssemblyName $asm -ErrorAction Stop } }
 catch { $null = [System.Windows.Forms.MessageBox]::Show("Failed to load assembly: $($_.Exception.Message)","Fatal Error",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Error); exit 1 }
 #endregion
 #region ==================== STATE ====================
-$script:State = @{ FilePath = ""; IsModified = $false; FindText = ""; FindCase = $false; LineEnding = "CRLF"; Encoding = "UTF-8"; ZoomLevel = $script:DEF_ZOOM; BaseFontSize = $script:DEF_FONT_SIZE; SettingsDir = Join-Path $env:APPDATA $script:SETTINGS_FOLDER; SettingsFile = Join-Path (Join-Path $env:APPDATA $script:SETTINGS_FOLDER) $script:SETTINGS_FILE }
+$script:State = @{ FilePath = ""; IsModified = $false; FindText = ""; FindCase = $false; LineEnding = "CRLF"; Encoding = "UTF-8"; ZoomLevel = $script:DEF_ZOOM; BaseFontSize = [double]$script:DEF_FONT_SIZE; BaseLineSpacing = [double]$script:DEF_SPACING; SettingsDir = Join-Path $env:APPDATA $script:SETTINGS_FOLDER; SettingsFile = Join-Path (Join-Path $env:APPDATA $script:SETTINGS_FOLDER) $script:SETTINGS_FILE }
 $script:UI = @{}; $script:Settings = $null; $script:Window = $null
 #endregion
 #region ==================== UTILITY ====================
@@ -100,24 +100,37 @@ function script:SaveSettings {
         $script:Settings.Font.Family = $script:UI.txtEditor.FontFamily.Source; $script:Settings.Font.Size = [string][int]$script:State.BaseFontSize
         $script:Settings.View.WordWrap = $script:UI.mnuWordWrap.IsChecked.ToString(); $script:Settings.View.StatusBar = $script:UI.mnuStatusBar.IsChecked.ToString()
         $script:Settings.Editor.MarginLeft = [string][int]$script:UI.txtEditor.Margin.Left; $script:Settings.Editor.MarginRight = [string][int]$script:UI.txtEditor.Margin.Right
-        $lh = $script:UI.txtEditor.GetValue([System.Windows.Controls.TextBlock]::LineHeightProperty); $fs = $script:UI.txtEditor.FontSize
-        if ($lh -gt 0 -and $fs -gt 0) { $sp = Clamp ($lh/$fs) $script:MIN_SPACING $script:MAX_SPACING; $script:Settings.Editor.LineSpacing = $sp.ToString("F1") }
+        $script:Settings.Editor.LineSpacing = $script:State.BaseLineSpacing.ToString("F1")
         $null = WriteIni $script:State.SettingsFile $script:Settings
     } catch {}
 }
 $null = EnsureSettingsDir; $script:Settings = LoadSettings
 #endregion
 #region ==================== LINE SPACING ====================
-function script:SetLineSpacing([double]$Spacing) { try { $sp = Clamp $Spacing $script:MIN_SPACING $script:MAX_SPACING; $lh = [double]($script:UI.txtEditor.FontSize * $sp); $script:UI.txtEditor.SetValue([System.Windows.Controls.TextBlock]::LineHeightProperty,$lh); $script:UI.txtEditor.SetValue([System.Windows.Controls.TextBlock]::LineStackingStrategyProperty,[System.Windows.LineStackingStrategy]::BlockLineHeight) } catch {} }
-function script:GetLineSpacing { try { $lh = $script:UI.txtEditor.GetValue([System.Windows.Controls.TextBlock]::LineHeightProperty); $fs = $script:UI.txtEditor.FontSize; if ($lh -gt 0 -and $fs -gt 0) { return ($lh/$fs) } } catch {}; $script:DEF_SPACING }
+function script:ApplyLineSpacingToEditor {
+    try {
+        $sp = Clamp $script:State.BaseLineSpacing $script:MIN_SPACING $script:MAX_SPACING
+        $currentFontSize = $script:UI.txtEditor.FontSize
+        if ($currentFontSize -le 0) { return }
+        $lh = [Math]::Max(1.0, [double]($currentFontSize * $sp))
+        $script:UI.txtEditor.SetValue([System.Windows.Controls.TextBlock]::LineHeightProperty, $lh)
+        $script:UI.txtEditor.SetValue([System.Windows.Controls.TextBlock]::LineStackingStrategyProperty, [System.Windows.LineStackingStrategy]::BlockLineHeight)
+    } catch {}
+}
 #endregion
 #region ==================== ZOOM ====================
-function script:UpdateZoomMenuState { $script:UI.mnuZoomReset.IsEnabled = ($script:State.ZoomLevel -ne $script:DEF_ZOOM) }
-function script:ApplyZoom { $factor = $script:State.ZoomLevel / 100.0; $newSize = Clamp ($script:State.BaseFontSize * $factor) 4 200; $script:UI.txtEditor.FontSize = $newSize; SetLineSpacing (GetLineSpacing); UpdateZoomDisplay; UpdateZoomMenuState }
-function script:ZoomIn { $script:State.ZoomLevel = [Math]::Min($script:MAX_ZOOM,$script:State.ZoomLevel + $script:ZOOM_STEP); ApplyZoom }
-function script:ZoomOut { $script:State.ZoomLevel = [Math]::Max($script:MIN_ZOOM,$script:State.ZoomLevel - $script:ZOOM_STEP); ApplyZoom }
-function script:ZoomReset { $script:State.ZoomLevel = $script:DEF_ZOOM; ApplyZoom }
-function script:UpdateZoomDisplay { $script:UI.txtZoom.Text = "$($script:State.ZoomLevel)%" }
+function script:UpdateZoomMenuState { try { $script:UI.mnuZoomReset.IsEnabled = ($script:State.ZoomLevel -ne $script:DEF_ZOOM) } catch {} }
+function script:ApplyZoom {
+    $factor = [double]$script:State.ZoomLevel / 100.0
+    $newSize = Clamp ([double]$script:State.BaseFontSize * $factor) 4.0 200.0
+    $script:UI.txtEditor.FontSize = $newSize
+    ApplyLineSpacingToEditor
+    UpdateZoomDisplay; UpdateZoomMenuState
+}
+function script:ZoomIn { $script:State.ZoomLevel = [Math]::Min($script:MAX_ZOOM, $script:State.ZoomLevel + $script:ZOOM_STEP); ApplyZoom }
+function script:ZoomOut { $script:State.ZoomLevel = [Math]::Max($script:MIN_ZOOM, $script:State.ZoomLevel - $script:ZOOM_STEP); ApplyZoom }
+function script:ZoomReset { if ($script:State.ZoomLevel -eq $script:DEF_ZOOM) { return }; $script:State.ZoomLevel = $script:DEF_ZOOM; ApplyZoom }
+function script:UpdateZoomDisplay { try { $script:UI.txtZoom.Text = "$($script:State.ZoomLevel)%" } catch {} }
 #endregion
 #region ==================== XAML ====================
 [xml]$script:Xaml = @"
@@ -126,7 +139,6 @@ function script:UpdateZoomDisplay { $script:UI.txtZoom.Text = "$($script:State.Z
     <Window.Resources>
         <Style TargetType="MenuItem"><Setter Property="Padding" Value="4,1"/><Setter Property="FontSize" Value="12"/></Style>
         <Style x:Key="SBText" TargetType="TextBlock"><Setter Property="FontSize" Value="11"/><Setter Property="FontWeight" Value="Normal"/><Setter Property="Foreground" Value="#444444"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
-        <Style x:Key="SBSep" TargetType="Separator"><Setter Property="Margin" Value="0,3"/><Setter Property="Width" Value="1"/><Setter Property="Background" Value="#AAAAAA"/></Style>
     </Window.Resources>
     <DockPanel>
         <Border DockPanel.Dock="Top" BorderBrush="#B0B0B0" BorderThickness="0,0,0,1"><Border BorderBrush="#E8E8E8" BorderThickness="0,0,0,1">
@@ -159,20 +171,19 @@ function script:UpdateZoomDisplay { $script:UI.txtZoom.Text = "$($script:State.Z
             </Menu></Border></Border>
         <Border DockPanel.Dock="Bottom" Name="statusBorder" BorderBrush="#808080" BorderThickness="0,1,0,0"><Border BorderBrush="#DFDFDF" BorderThickness="0,1,0,0">
             <StatusBar Name="statusBar" Background="#E8E8E8" Padding="6,1" Height="22">
-                <StatusBar.Resources><Style TargetType="Separator"><Setter Property="Margin" Value="0,3"/><Setter Property="Width" Value="1"/><Setter Property="Background" Value="#AAAAAA"/></Style></StatusBar.Resources>
                 <StatusBar.ItemsPanel><ItemsPanelTemplate><DockPanel LastChildFill="False"/></ItemsPanelTemplate></StatusBar.ItemsPanel>
                 <StatusBarItem DockPanel.Dock="Right" Margin="8,0,6,0"><TextBlock Name="txtEnc" Text="UTF-8" Style="{StaticResource SBText}"/></StatusBarItem>
-                <Separator DockPanel.Dock="Right"/>
+                <StatusBarItem DockPanel.Dock="Right" Margin="0,4,0,4"><Rectangle Width="1" Fill="#AAAAAA" VerticalAlignment="Stretch"/></StatusBarItem>
                 <StatusBarItem DockPanel.Dock="Right" Margin="8,0,8,0"><TextBlock Name="txtEol" Text="Windows (CRLF)" Style="{StaticResource SBText}"/></StatusBarItem>
-                <Separator DockPanel.Dock="Right"/>
+                <StatusBarItem DockPanel.Dock="Right" Margin="0,4,0,4"><Rectangle Width="1" Fill="#AAAAAA" VerticalAlignment="Stretch"/></StatusBarItem>
                 <StatusBarItem DockPanel.Dock="Right" Margin="8,0,8,0"><TextBlock Name="txtZoom" Text="100%" Style="{StaticResource SBText}"/></StatusBarItem>
-                <Separator DockPanel.Dock="Right"/>
+                <StatusBarItem DockPanel.Dock="Right" Margin="0,4,0,4"><Rectangle Width="1" Fill="#AAAAAA" VerticalAlignment="Stretch"/></StatusBarItem>
                 <StatusBarItem DockPanel.Dock="Right" Margin="8,0,8,0"><TextBlock Name="txtLines" Text="Lines: 1" Style="{StaticResource SBText}"/></StatusBarItem>
-                <Separator DockPanel.Dock="Right"/>
+                <StatusBarItem DockPanel.Dock="Right" Margin="0,4,0,4"><Rectangle Width="1" Fill="#AAAAAA" VerticalAlignment="Stretch"/></StatusBarItem>
                 <StatusBarItem DockPanel.Dock="Right" Margin="8,0,8,0"><TextBlock Name="txtChars" Text="Chars: 0" Style="{StaticResource SBText}"/></StatusBarItem>
-                <Separator DockPanel.Dock="Right"/>
+                <StatusBarItem DockPanel.Dock="Right" Margin="0,4,0,4"><Rectangle Width="1" Fill="#AAAAAA" VerticalAlignment="Stretch"/></StatusBarItem>
                 <StatusBarItem DockPanel.Dock="Right" Margin="8,0,8,0"><TextBlock Name="txtWords" Text="Words: 0" Style="{StaticResource SBText}"/></StatusBarItem>
-                <Separator DockPanel.Dock="Right"/>
+                <StatusBarItem DockPanel.Dock="Right" Margin="0,4,0,4"><Rectangle Width="1" Fill="#AAAAAA" VerticalAlignment="Stretch"/></StatusBarItem>
                 <StatusBarItem DockPanel.Dock="Right" Margin="6,0,8,0"><TextBlock Name="txtPos" Text="Ln 1, Col 1" Style="{StaticResource SBText}"/></StatusBarItem>
             </StatusBar></Border></Border>
         <Border Background="$script:COLOR_CHROME"><TextBox Name="txtEditor" AcceptsReturn="True" AcceptsTab="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" BorderThickness="0" Background="$script:COLOR_EDITOR_BG" Foreground="$script:COLOR_EDITOR_FG" Padding="8,6" UndoLimit="1000" IsUndoEnabled="True"/></Border>
@@ -186,37 +197,52 @@ catch { $null = [System.Windows.MessageBox]::Show("XAML load failed: $($_.Except
 $script:ControlNames = @("txtEditor","txtPos","txtWords","txtChars","txtLines","txtEnc","txtEol","txtZoom","statusBar","statusBorder","menuBar","mnuNew","mnuOpen","mnuSave","mnuSaveAs","mnuExit","mnuUndo","mnuRedo","mnuCut","mnuCopy","mnuPaste","mnuDelete","mnuFind","mnuFindNext","mnuReplace","mnuSelAll","mnuDate","mnuWordWrap","mnuFont","mnuEditorCfg","mnuStatusBar","mnuZoomIn","mnuZoomOut","mnuZoomReset","mnuLineEndings","mnuEolCRLF","mnuEolLF","mnuEolCR","mnuEncoding","mnuEncUtf8","mnuEncUtf8Bom","mnuEncUtf16LE","mnuEncUtf16BE")
 foreach ($n in $script:ControlNames) { $c = $script:Window.FindName($n); if ($null -eq $c) { $null = [System.Windows.MessageBox]::Show("Missing control: $n","Fatal Error","OK","Error"); exit 1 }; $script:UI[$n] = $c }
 try {
-    $w = Clamp (ToDouble $script:Settings.Window.Width $script:DEF_WINDOW_W) $script:MIN_WINDOW_W $script:MAX_WINDOW_W; $h = Clamp (ToDouble $script:Settings.Window.Height $script:DEF_WINDOW_H) $script:MIN_WINDOW_H $script:MAX_WINDOW_H
+    $w = Clamp (ToDouble $script:Settings.Window.Width $script:DEF_WINDOW_W) $script:MIN_WINDOW_W $script:MAX_WINDOW_W
+    $h = Clamp (ToDouble $script:Settings.Window.Height $script:DEF_WINDOW_H) $script:MIN_WINDOW_H $script:MAX_WINDOW_H
     $script:Window.Width = $w; $script:Window.Height = $h
-    $family = $script:Settings.Font.Family; if (-not (TestFont $family)) { $family = $script:DEF_FONT_FAMILY }; $script:UI.txtEditor.FontFamily = [System.Windows.Media.FontFamily]::new($family)
-    $fsize = Clamp (ToDouble $script:Settings.Font.Size $script:DEF_FONT_SIZE) $script:MIN_FONT $script:MAX_FONT; $script:State.BaseFontSize = $fsize; $script:UI.txtEditor.FontSize = $fsize
-    $ml = Clamp (ToDouble $script:Settings.Editor.MarginLeft $script:DEF_MARGIN) $script:MIN_MARGIN $script:MAX_MARGIN; $mr = Clamp (ToDouble $script:Settings.Editor.MarginRight $script:DEF_MARGIN) $script:MIN_MARGIN $script:MAX_MARGIN
+    $family = $script:Settings.Font.Family; if (-not (TestFont $family)) { $family = $script:DEF_FONT_FAMILY }
+    $script:UI.txtEditor.FontFamily = [System.Windows.Media.FontFamily]::new($family)
+    $fsize = Clamp (ToDouble $script:Settings.Font.Size $script:DEF_FONT_SIZE) $script:MIN_FONT $script:MAX_FONT
+    $script:State.BaseFontSize = [double]$fsize; $script:UI.txtEditor.FontSize = [double]$fsize
+    $ml = Clamp (ToDouble $script:Settings.Editor.MarginLeft $script:DEF_MARGIN) $script:MIN_MARGIN $script:MAX_MARGIN
+    $mr = Clamp (ToDouble $script:Settings.Editor.MarginRight $script:DEF_MARGIN) $script:MIN_MARGIN $script:MAX_MARGIN
     $script:UI.txtEditor.Margin = [System.Windows.Thickness]::new($ml,0,$mr,0)
-    $sp = Clamp (ToDouble $script:Settings.Editor.LineSpacing $script:DEF_SPACING) $script:MIN_SPACING $script:MAX_SPACING; SetLineSpacing $sp
-    $script:UI.mnuWordWrap.IsChecked = ToBool $script:Settings.View.WordWrap $false; $script:UI.mnuStatusBar.IsChecked = ToBool $script:Settings.View.StatusBar $true
+    $sp = Clamp (ToDouble $script:Settings.Editor.LineSpacing $script:DEF_SPACING) $script:MIN_SPACING $script:MAX_SPACING
+    $script:State.BaseLineSpacing = [double]$sp; ApplyLineSpacingToEditor
+    $script:UI.mnuWordWrap.IsChecked = ToBool $script:Settings.View.WordWrap $false
+    $script:UI.mnuStatusBar.IsChecked = ToBool $script:Settings.View.StatusBar $true
 } catch {}
-# Throttled status update timer
 $script:StatusUpdateTimer = [System.Windows.Threading.DispatcherTimer]::new()
 $script:StatusUpdateTimer.Interval = [TimeSpan]::FromMilliseconds(50)
-$script:StatusUpdateTimer.Add_Tick({
-    $script:StatusUpdateTimer.Stop(); $script:StatusUpdatePending = $false
-    UpdateStatusImmediate
-})
+$script:StatusUpdateTimer.Add_Tick({ $script:StatusUpdateTimer.Stop(); $script:StatusUpdatePending = $false; UpdateStatusImmediate })
 #endregion
 #region ==================== UI UPDATES ====================
-function script:UpdateTitle { $name = if ([string]::IsNullOrEmpty($script:State.FilePath)) { "Untitled" } else { [System.IO.Path]::GetFileName($script:State.FilePath) }; $mod = if ($script:State.IsModified) { "*" } else { "" }; $script:Window.Title = "$mod$name - $script:APP_NAME" }
-function script:UpdateStatusImmediate {
-    if ($script:UI.statusBar.Visibility -ne "Visible") { return }
-    try { $txt = $script:UI.txtEditor.Text; $len = if ($null -eq $txt) { 0 } else { $txt.Length }; $car = [Math]::Max(0,[Math]::Min($script:UI.txtEditor.CaretIndex,$len))
-        if ($len -eq 0 -or $car -eq 0) { $ln = 1; $col = 1 } else { $before = $txt.Substring(0,$car); $ln = ($before.Split("`n")).Count; $nlPos = $before.LastIndexOf("`n"); $col = if ($nlPos -ge 0) { $car - $nlPos } else { $car + 1 } }
-        $script:UI.txtPos.Text = "Ln $ln, Col $col"
-        $wc = if ($len -eq 0) { 0 } else { @($txt -split '\s+' | Where-Object { $_.Length -gt 0 }).Count }; $script:UI.txtWords.Text = "Words: $wc"
-        $script:UI.txtChars.Text = "Chars: $len"; $lc = if ($len -eq 0) { 1 } else { ($txt.Split("`n")).Count }; $script:UI.txtLines.Text = "Lines: $lc"
-        $script:UI.txtEol.Text = EolDisplayLabel $script:State.LineEnding; $script:UI.txtEnc.Text = $script:State.Encoding; $script:UI.txtZoom.Text = "$($script:State.ZoomLevel)%"
+function script:UpdateTitle {
+    try { $name = if ([string]::IsNullOrEmpty($script:State.FilePath)) { "Untitled" } else { [System.IO.Path]::GetFileName($script:State.FilePath) }
+        $mod = if ($script:State.IsModified) { "*" } else { "" }; $script:Window.Title = "$mod$name - $script:APP_NAME"
     } catch {}
 }
-function script:UpdateStatus {
-    if (-not $script:StatusUpdatePending) { $script:StatusUpdatePending = $true; $script:StatusUpdateTimer.Start() }
+function script:UpdateStatusImmediate {
+    if ($null -eq $script:UI -or $null -eq $script:UI.statusBar) { return }
+    if ($script:UI.statusBar.Visibility -ne "Visible") { return }
+    try {
+        $txt = $script:UI.txtEditor.Text; $len = if ($null -eq $txt) { 0 } else { $txt.Length }
+        $car = [Math]::Max(0,[Math]::Min($script:UI.txtEditor.CaretIndex,$len))
+        if ($len -eq 0 -or $car -eq 0) { $ln = 1; $col = 1 }
+        else { $before = $txt.Substring(0,$car); $ln = ($before.Split("`n")).Count; $nlPos = $before.LastIndexOf("`n"); $col = if ($nlPos -ge 0) { $car - $nlPos } else { $car + 1 } }
+        $script:UI.txtPos.Text = "Ln $ln, Col $col"
+        if ($len -eq 0) { $wc = 0 } else {
+            $wc = 0; $inWord = $false
+            for ($i = 0; $i -lt $len; $i++) { $ch = $txt[$i]; if ([char]::IsWhiteSpace($ch)) { $inWord = $false } elseif (-not $inWord) { $wc++; $inWord = $true } }
+        }
+        $script:UI.txtWords.Text = "Words: $wc"; $script:UI.txtChars.Text = "Chars: $len"
+        $lc = if ($len -eq 0) { 1 } else { ($txt.Split("`n")).Count }; $script:UI.txtLines.Text = "Lines: $lc"
+        $script:UI.txtEol.Text = EolDisplayLabel $script:State.LineEnding; $script:UI.txtEnc.Text = $script:State.Encoding
+        $script:UI.txtZoom.Text = "$($script:State.ZoomLevel)%"
+    } catch {}
+}
+function script:RequestStatusUpdate {
+    if (-not $script:StatusUpdatePending) { $script:StatusUpdatePending = $true; $script:StatusUpdateTimer.Stop(); $script:StatusUpdateTimer.Start() }
 }
 #endregion
 #region ==================== DOCUMENT OPS ====================
@@ -226,47 +252,69 @@ function script:ConfirmSave {
     $r = [System.Windows.MessageBox]::Show("Do you want to save changes to $name`?",$script:APP_NAME,"YesNoCancel","Warning")
     switch ($r) { "Yes" { return (DoSave) } "No" { return $true } "Cancel" { return $false } default { return $false } }
 }
-function script:DoNew { if (-not (ConfirmSave)) { return }; $script:UI.txtEditor.Clear(); $script:State.FilePath = ""; $script:State.IsModified = $false; $script:State.LineEnding = "CRLF"; $script:State.Encoding = "UTF-8"; $script:State.ZoomLevel = $script:DEF_ZOOM; ApplyZoom; UpdateTitle; UpdateStatusImmediate; $null = $script:UI.txtEditor.Focus() }
+function script:DoNew {
+    if (-not (ConfirmSave)) { return }
+    $script:UI.txtEditor.Clear(); $script:State.FilePath = ""; $script:State.IsModified = $false
+    $script:State.LineEnding = "CRLF"; $script:State.Encoding = "UTF-8"; $script:State.ZoomLevel = $script:DEF_ZOOM
+    ApplyZoom; UpdateTitle; UpdateStatusImmediate; $null = $script:UI.txtEditor.Focus()
+}
 function script:DoOpen {
     if (-not (ConfirmSave)) { return }
-    $dlg = [System.Windows.Forms.OpenFileDialog]::new(); $dlg.Title = "Open"; $dlg.Filter = "Text Files (*.txt)|*.txt|All Files (*.*)|*.*"; $dlg.CheckFileExists = $true; $dlg.CheckPathExists = $true; $dlg.RestoreDirectory = $true
-    try { if ($dlg.ShowDialog() -ne "OK") { return }
+    $dlg = [System.Windows.Forms.OpenFileDialog]::new(); $dlg.Title = "Open"
+    $dlg.Filter = "Text Files (*.txt)|*.txt|All Files (*.*)|*.*"
+    $dlg.CheckFileExists = $true; $dlg.CheckPathExists = $true; $dlg.RestoreDirectory = $true
+    try {
+        if ($dlg.ShowDialog() -ne "OK") { return }
         $fi = [System.IO.FileInfo]::new($dlg.FileName)
         if ($fi.Length -gt 10MB) { $r = [System.Windows.MessageBox]::Show("File exceeds 10 MB. Loading may be slow. Continue?","Large File","YesNo","Warning"); if ($r -ne "Yes") { return } }
         $det = DetectEncoding $dlg.FileName; $script:State.Encoding = $det.Name
-        $content = [System.IO.File]::ReadAllText($dlg.FileName,$det.Encoding); $script:State.LineEnding = DetectLineEnding $content
+        $content = [System.IO.File]::ReadAllText($dlg.FileName,$det.Encoding)
+        $script:State.LineEnding = DetectLineEnding $content
         $script:UI.txtEditor.Text = $content; $script:State.FilePath = $dlg.FileName; $script:State.IsModified = $false
         UpdateTitle; UpdateStatusImmediate; $script:UI.txtEditor.CaretIndex = 0; $script:UI.txtEditor.ScrollToHome(); $null = $script:UI.txtEditor.Focus()
     } catch { $null = [System.Windows.MessageBox]::Show("Cannot open file:`n$($_.Exception.Message)","Error","OK","Error") } finally { $dlg.Dispose() }
 }
 function script:GetCurrentEncoding {
-    $name = $script:State.Encoding; foreach ($key in $script:ENCODINGS.Keys) { if ($key -eq $name) { return $script:ENCODINGS[$key] } }
+    $name = $script:State.Encoding
+    foreach ($key in $script:ENCODINGS.Keys) { if ($key -eq $name) { return $script:ENCODINGS[$key] } }
     switch -Wildcard ($name) { "*UTF-8*BOM*" { return [System.Text.UTF8Encoding]::new($true) } "*UTF-8*" { return [System.Text.UTF8Encoding]::new($false) } "*UTF-16 LE*" { return [System.Text.UnicodeEncoding]::new($false,$true) } "*UTF-16 BE*" { return [System.Text.UnicodeEncoding]::new($true,$true) } default { return [System.Text.UTF8Encoding]::new($false) } }
 }
 function script:DoSave {
     if ([string]::IsNullOrEmpty($script:State.FilePath)) { return DoSaveAs }
-    try { $text = ConvertLineEndings $script:UI.txtEditor.Text $script:State.LineEnding; [System.IO.File]::WriteAllText($script:State.FilePath,$text,(GetCurrentEncoding)); $script:State.IsModified = $false; UpdateTitle; return $true }
-    catch { $null = [System.Windows.MessageBox]::Show("Cannot save file:`n$($_.Exception.Message)","Error","OK","Error"); return $false }
+    try { $text = ConvertLineEndings $script:UI.txtEditor.Text $script:State.LineEnding
+        [System.IO.File]::WriteAllText($script:State.FilePath,$text,(GetCurrentEncoding))
+        $script:State.IsModified = $false; UpdateTitle; return $true
+    } catch { $null = [System.Windows.MessageBox]::Show("Cannot save file:`n$($_.Exception.Message)","Error","OK","Error"); return $false }
 }
 function script:DoSaveAs {
-    $dlg = [System.Windows.Forms.SaveFileDialog]::new(); $dlg.Title = "Save As"; $dlg.Filter = "Text Files (*.txt)|*.txt|All Files (*.*)|*.*"; $dlg.DefaultExt = "txt"; $dlg.AddExtension = $true; $dlg.OverwritePrompt = $true; $dlg.RestoreDirectory = $true
+    $dlg = [System.Windows.Forms.SaveFileDialog]::new(); $dlg.Title = "Save As"
+    $dlg.Filter = "Text Files (*.txt)|*.txt|All Files (*.*)|*.*"; $dlg.DefaultExt = "txt"
+    $dlg.AddExtension = $true; $dlg.OverwritePrompt = $true; $dlg.RestoreDirectory = $true
     if (-not [string]::IsNullOrEmpty($script:State.FilePath)) { $dlg.InitialDirectory = [System.IO.Path]::GetDirectoryName($script:State.FilePath); $dlg.FileName = [System.IO.Path]::GetFileName($script:State.FilePath) } else { $dlg.FileName = "Untitled.txt" }
-    try { if ($dlg.ShowDialog() -ne "OK") { return $false }; $text = ConvertLineEndings $script:UI.txtEditor.Text $script:State.LineEnding; [System.IO.File]::WriteAllText($dlg.FileName,$text,(GetCurrentEncoding)); $script:State.FilePath = $dlg.FileName; $script:State.IsModified = $false; UpdateTitle; return $true }
-    catch { $null = [System.Windows.MessageBox]::Show("Cannot save file:`n$($_.Exception.Message)","Error","OK","Error"); return $false } finally { $dlg.Dispose() }
+    try { if ($dlg.ShowDialog() -ne "OK") { return $false }
+        $text = ConvertLineEndings $script:UI.txtEditor.Text $script:State.LineEnding
+        [System.IO.File]::WriteAllText($dlg.FileName,$text,(GetCurrentEncoding))
+        $script:State.FilePath = $dlg.FileName; $script:State.IsModified = $false; UpdateTitle; return $true
+    } catch { $null = [System.Windows.MessageBox]::Show("Cannot save file:`n$($_.Exception.Message)","Error","OK","Error"); return $false } finally { $dlg.Dispose() }
 }
 #endregion
 #region ==================== FIND / REPLACE ====================
 function script:DoFind([string]$Text,[bool]$Case,[bool]$Msg = $true) {
-    if ([string]::IsNullOrWhiteSpace($Text)) { return $false }; $script:State.FindText = $Text; $script:State.FindCase = $Case
-    $body = $script:UI.txtEditor.Text; if ([string]::IsNullOrEmpty($body)) { if ($Msg) { NotFound $Text }; return $false }
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $false }
+    $script:State.FindText = $Text; $script:State.FindCase = $Case
+    $body = $script:UI.txtEditor.Text
+    if ([string]::IsNullOrEmpty($body)) { if ($Msg) { NotFound $Text }; return $false }
     $cmp = if ($Case) { [System.StringComparison]::Ordinal } else { [System.StringComparison]::OrdinalIgnoreCase }
-    $start = $script:UI.txtEditor.SelectionStart + $script:UI.txtEditor.SelectionLength; if ($start -ge $body.Length) { $start = 0 }
-    $idx = $body.IndexOf($Text,$start,$cmp); if ($idx -lt 0 -and $start -gt 0) { $idx = $body.IndexOf($Text,0,$cmp) }
+    $start = $script:UI.txtEditor.SelectionStart + $script:UI.txtEditor.SelectionLength
+    if ($start -ge $body.Length) { $start = 0 }
+    $idx = $body.IndexOf($Text,$start,$cmp)
+    if ($idx -lt 0 -and $start -gt 0) { $idx = $body.IndexOf($Text,0,$cmp) }
     if ($idx -ge 0) {
-        $null = $script:UI.txtEditor.Focus(); $script:UI.txtEditor.Select($idx,$Text.Length)
-        $li = $script:UI.txtEditor.GetLineIndexFromCharacterIndex($idx); if ($li -ge 0) { $script:UI.txtEditor.ScrollToLine($li) }
-        # Apply highlight colors to selection
-        $script:UI.txtEditor.SelectionBrush = [System.Windows.Media.BrushConverter]::new().ConvertFrom($script:COLOR_FIND_BG)
+        $null = $script:UI.txtEditor.Focus()
+        $script:UI.txtEditor.Select($idx,$Text.Length)
+        try { $script:UI.txtEditor.SelectionBrush = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString($script:COLOR_FIND_BG)) } catch {}
+        $li = $script:UI.txtEditor.GetLineIndexFromCharacterIndex($idx)
+        if ($li -ge 0) { $script:UI.txtEditor.ScrollToLine($li) }
         return $true
     }
     if ($Msg) { NotFound $Text }; $false
@@ -274,29 +322,54 @@ function script:DoFind([string]$Text,[bool]$Case,[bool]$Msg = $true) {
 function script:NotFound([string]$Text) { $null = [System.Windows.MessageBox]::Show("Cannot find `"$Text`"",$script:APP_NAME,"OK","Information") }
 function script:DoFindNext { if ([string]::IsNullOrWhiteSpace($script:State.FindText)) { ShowFindDlg } else { $null = DoFind $script:State.FindText $script:State.FindCase } }
 function script:ShowFindDlg {
-    $d = [System.Windows.Window]::new(); $d.Title = "Find"; $d.Width = 460; $d.Height = 150; $d.WindowStartupLocation = "CenterOwner"; $d.Owner = $script:Window; $d.ResizeMode = "NoResize"; $d.ShowInTaskbar = $false; $d.WindowStyle = "ToolWindow"; $d.Background = [System.Windows.Media.BrushConverter]::new().ConvertFrom($script:COLOR_CHROME)
-    $g = [System.Windows.Controls.Grid]::new(); $g.Margin = [System.Windows.Thickness]::new(15); $null = $g.RowDefinitions.Add([System.Windows.Controls.RowDefinition]::new()); $null = $g.RowDefinitions.Add([System.Windows.Controls.RowDefinition]::new())
+    $d = [System.Windows.Window]::new(); $d.Title = "Find"; $d.Width = 460; $d.Height = 150
+    $d.WindowStartupLocation = "CenterOwner"; $d.Owner = $script:Window; $d.ResizeMode = "NoResize"
+    $d.ShowInTaskbar = $false; $d.WindowStyle = "ToolWindow"
+    $d.Background = [System.Windows.Media.BrushConverter]::new().ConvertFrom($script:COLOR_CHROME)
+    $g = [System.Windows.Controls.Grid]::new(); $g.Margin = [System.Windows.Thickness]::new(15)
+    $null = $g.RowDefinitions.Add([System.Windows.Controls.RowDefinition]::new())
+    $null = $g.RowDefinitions.Add([System.Windows.Controls.RowDefinition]::new())
     foreach ($cw in @("Auto","1*","Auto")) { $cd = [System.Windows.Controls.ColumnDefinition]::new(); $cd.Width = if ($cw -eq "1*") { [System.Windows.GridLength]::new(1,"Star") } else { [System.Windows.GridLength]::Auto }; $g.ColumnDefinitions.Add($cd) }
-    $lbl = [System.Windows.Controls.Label]::new(); $lbl.Content = "Find what:"; $lbl.VerticalAlignment = "Center"; [System.Windows.Controls.Grid]::SetRow($lbl,0); [System.Windows.Controls.Grid]::SetColumn($lbl,0); $null = $g.Children.Add($lbl)
-    $tb = [System.Windows.Controls.TextBox]::new(); $tb.Margin = [System.Windows.Thickness]::new(10,0,10,0); $tb.Height = 26; $tb.VerticalContentAlignment = "Center"; $tb.Text = $script:State.FindText; [System.Windows.Controls.Grid]::SetRow($tb,0); [System.Windows.Controls.Grid]::SetColumn($tb,1); $null = $g.Children.Add($tb)
-    $bf = [System.Windows.Controls.Button]::new(); $bf.Content = "Find Next"; $bf.Width = 90; $bf.Height = 28; $bf.IsDefault = $true; [System.Windows.Controls.Grid]::SetRow($bf,0); [System.Windows.Controls.Grid]::SetColumn($bf,2); $null = $g.Children.Add($bf)
-    $ck = [System.Windows.Controls.CheckBox]::new(); $ck.Content = "Match case"; $ck.Margin = [System.Windows.Thickness]::new(0,15,0,0); $ck.IsChecked = $script:State.FindCase; [System.Windows.Controls.Grid]::SetRow($ck,1); [System.Windows.Controls.Grid]::SetColumn($ck,1); $null = $g.Children.Add($ck)
-    $bc = [System.Windows.Controls.Button]::new(); $bc.Content = "Cancel"; $bc.Width = 90; $bc.Height = 28; $bc.IsCancel = $true; $bc.Margin = [System.Windows.Thickness]::new(0,15,0,0); [System.Windows.Controls.Grid]::SetRow($bc,1); [System.Windows.Controls.Grid]::SetColumn($bc,2); $null = $g.Children.Add($bc)
-    $d.Content = $g; $bf.Add_Click({ $null = DoFind $tb.Text $ck.IsChecked }); $bc.Add_Click({ $d.Close() }); $null = $tb.Focus(); $tb.SelectAll(); $null = $d.ShowDialog()
+    $lbl = [System.Windows.Controls.Label]::new(); $lbl.Content = "Find what:"; $lbl.VerticalAlignment = "Center"
+    [System.Windows.Controls.Grid]::SetRow($lbl,0); [System.Windows.Controls.Grid]::SetColumn($lbl,0); $null = $g.Children.Add($lbl)
+    $tb = [System.Windows.Controls.TextBox]::new(); $tb.Margin = [System.Windows.Thickness]::new(10,0,10,0); $tb.Height = 26
+    $tb.VerticalContentAlignment = "Center"; $tb.Text = $script:State.FindText
+    [System.Windows.Controls.Grid]::SetRow($tb,0); [System.Windows.Controls.Grid]::SetColumn($tb,1); $null = $g.Children.Add($tb)
+    $bf = [System.Windows.Controls.Button]::new(); $bf.Content = "Find Next"; $bf.Width = 90; $bf.Height = 28; $bf.IsDefault = $true
+    [System.Windows.Controls.Grid]::SetRow($bf,0); [System.Windows.Controls.Grid]::SetColumn($bf,2); $null = $g.Children.Add($bf)
+    $ck = [System.Windows.Controls.CheckBox]::new(); $ck.Content = "Match case"; $ck.Margin = [System.Windows.Thickness]::new(0,15,0,0); $ck.IsChecked = $script:State.FindCase
+    [System.Windows.Controls.Grid]::SetRow($ck,1); [System.Windows.Controls.Grid]::SetColumn($ck,1); $null = $g.Children.Add($ck)
+    $bc = [System.Windows.Controls.Button]::new(); $bc.Content = "Cancel"; $bc.Width = 90; $bc.Height = 28; $bc.IsCancel = $true; $bc.Margin = [System.Windows.Thickness]::new(0,15,0,0)
+    [System.Windows.Controls.Grid]::SetRow($bc,1); [System.Windows.Controls.Grid]::SetColumn($bc,2); $null = $g.Children.Add($bc)
+    $d.Content = $g; $bf.Add_Click({ $null = DoFind $tb.Text $ck.IsChecked }); $bc.Add_Click({ $d.Close() })
+    $null = $tb.Focus(); $tb.SelectAll(); $null = $d.ShowDialog()
 }
 function script:ShowReplaceDlg {
-    $d = [System.Windows.Window]::new(); $d.Title = "Replace"; $d.Width = 480; $d.Height = 210; $d.WindowStartupLocation = "CenterOwner"; $d.Owner = $script:Window; $d.ResizeMode = "NoResize"; $d.ShowInTaskbar = $false; $d.WindowStyle = "ToolWindow"; $d.Background = [System.Windows.Media.BrushConverter]::new().ConvertFrom($script:COLOR_CHROME)
-    $g = [System.Windows.Controls.Grid]::new(); $g.Margin = [System.Windows.Thickness]::new(15); for ($i = 0; $i -lt 4; $i++) { $null = $g.RowDefinitions.Add([System.Windows.Controls.RowDefinition]::new()) }
+    $d = [System.Windows.Window]::new(); $d.Title = "Replace"; $d.Width = 480; $d.Height = 210
+    $d.WindowStartupLocation = "CenterOwner"; $d.Owner = $script:Window; $d.ResizeMode = "NoResize"
+    $d.ShowInTaskbar = $false; $d.WindowStyle = "ToolWindow"
+    $d.Background = [System.Windows.Media.BrushConverter]::new().ConvertFrom($script:COLOR_CHROME)
+    $g = [System.Windows.Controls.Grid]::new(); $g.Margin = [System.Windows.Thickness]::new(15)
+    for ($i = 0; $i -lt 4; $i++) { $null = $g.RowDefinitions.Add([System.Windows.Controls.RowDefinition]::new()) }
     foreach ($cw in @("Auto","1*","Auto")) { $cd = [System.Windows.Controls.ColumnDefinition]::new(); $cd.Width = if ($cw -eq "1*") { [System.Windows.GridLength]::new(1,"Star") } else { [System.Windows.GridLength]::Auto }; $g.ColumnDefinitions.Add($cd) }
-    $l1 = [System.Windows.Controls.Label]::new(); $l1.Content = "Find what:"; $l1.VerticalAlignment = "Center"; [System.Windows.Controls.Grid]::SetRow($l1,0); [System.Windows.Controls.Grid]::SetColumn($l1,0); $null = $g.Children.Add($l1)
-    $tFind = [System.Windows.Controls.TextBox]::new(); $tFind.Margin = [System.Windows.Thickness]::new(10,5,10,5); $tFind.Height = 26; $tFind.VerticalContentAlignment = "Center"; $tFind.Text = $script:State.FindText; [System.Windows.Controls.Grid]::SetRow($tFind,0); [System.Windows.Controls.Grid]::SetColumn($tFind,1); $null = $g.Children.Add($tFind)
-    $bfn = [System.Windows.Controls.Button]::new(); $bfn.Content = "Find Next"; $bfn.Width = 100; $bfn.Height = 28; $bfn.Margin = [System.Windows.Thickness]::new(0,5,0,5); [System.Windows.Controls.Grid]::SetRow($bfn,0); [System.Windows.Controls.Grid]::SetColumn($bfn,2); $null = $g.Children.Add($bfn)
-    $l2 = [System.Windows.Controls.Label]::new(); $l2.Content = "Replace with:"; $l2.VerticalAlignment = "Center"; [System.Windows.Controls.Grid]::SetRow($l2,1); [System.Windows.Controls.Grid]::SetColumn($l2,0); $null = $g.Children.Add($l2)
-    $tRepl = [System.Windows.Controls.TextBox]::new(); $tRepl.Margin = [System.Windows.Thickness]::new(10,5,10,5); $tRepl.Height = 26; $tRepl.VerticalContentAlignment = "Center"; [System.Windows.Controls.Grid]::SetRow($tRepl,1); [System.Windows.Controls.Grid]::SetColumn($tRepl,1); $null = $g.Children.Add($tRepl)
-    $brp = [System.Windows.Controls.Button]::new(); $brp.Content = "Replace"; $brp.Width = 100; $brp.Height = 28; $brp.Margin = [System.Windows.Thickness]::new(0,5,0,5); [System.Windows.Controls.Grid]::SetRow($brp,1); [System.Windows.Controls.Grid]::SetColumn($brp,2); $null = $g.Children.Add($brp)
-    $ck = [System.Windows.Controls.CheckBox]::new(); $ck.Content = "Match case"; $ck.Margin = [System.Windows.Thickness]::new(0,10,0,0); $ck.IsChecked = $script:State.FindCase; [System.Windows.Controls.Grid]::SetRow($ck,2); [System.Windows.Controls.Grid]::SetColumn($ck,1); $null = $g.Children.Add($ck)
-    $bra = [System.Windows.Controls.Button]::new(); $bra.Content = "Replace All"; $bra.Width = 100; $bra.Height = 28; $bra.Margin = [System.Windows.Thickness]::new(0,5,0,5); [System.Windows.Controls.Grid]::SetRow($bra,2); [System.Windows.Controls.Grid]::SetColumn($bra,2); $null = $g.Children.Add($bra)
-    $bcx = [System.Windows.Controls.Button]::new(); $bcx.Content = "Cancel"; $bcx.Width = 100; $bcx.Height = 28; $bcx.IsCancel = $true; $bcx.Margin = [System.Windows.Thickness]::new(0,5,0,5); [System.Windows.Controls.Grid]::SetRow($bcx,3); [System.Windows.Controls.Grid]::SetColumn($bcx,2); $null = $g.Children.Add($bcx)
+    $l1 = [System.Windows.Controls.Label]::new(); $l1.Content = "Find what:"; $l1.VerticalAlignment = "Center"
+    [System.Windows.Controls.Grid]::SetRow($l1,0); [System.Windows.Controls.Grid]::SetColumn($l1,0); $null = $g.Children.Add($l1)
+    $tFind = [System.Windows.Controls.TextBox]::new(); $tFind.Margin = [System.Windows.Thickness]::new(10,5,10,5); $tFind.Height = 26; $tFind.VerticalContentAlignment = "Center"; $tFind.Text = $script:State.FindText
+    [System.Windows.Controls.Grid]::SetRow($tFind,0); [System.Windows.Controls.Grid]::SetColumn($tFind,1); $null = $g.Children.Add($tFind)
+    $bfn = [System.Windows.Controls.Button]::new(); $bfn.Content = "Find Next"; $bfn.Width = 100; $bfn.Height = 28; $bfn.Margin = [System.Windows.Thickness]::new(0,5,0,5)
+    [System.Windows.Controls.Grid]::SetRow($bfn,0); [System.Windows.Controls.Grid]::SetColumn($bfn,2); $null = $g.Children.Add($bfn)
+    $l2 = [System.Windows.Controls.Label]::new(); $l2.Content = "Replace with:"; $l2.VerticalAlignment = "Center"
+    [System.Windows.Controls.Grid]::SetRow($l2,1); [System.Windows.Controls.Grid]::SetColumn($l2,0); $null = $g.Children.Add($l2)
+    $tRepl = [System.Windows.Controls.TextBox]::new(); $tRepl.Margin = [System.Windows.Thickness]::new(10,5,10,5); $tRepl.Height = 26; $tRepl.VerticalContentAlignment = "Center"
+    [System.Windows.Controls.Grid]::SetRow($tRepl,1); [System.Windows.Controls.Grid]::SetColumn($tRepl,1); $null = $g.Children.Add($tRepl)
+    $brp = [System.Windows.Controls.Button]::new(); $brp.Content = "Replace"; $brp.Width = 100; $brp.Height = 28; $brp.Margin = [System.Windows.Thickness]::new(0,5,0,5)
+    [System.Windows.Controls.Grid]::SetRow($brp,1); [System.Windows.Controls.Grid]::SetColumn($brp,2); $null = $g.Children.Add($brp)
+    $ck = [System.Windows.Controls.CheckBox]::new(); $ck.Content = "Match case"; $ck.Margin = [System.Windows.Thickness]::new(0,10,0,0); $ck.IsChecked = $script:State.FindCase
+    [System.Windows.Controls.Grid]::SetRow($ck,2); [System.Windows.Controls.Grid]::SetColumn($ck,1); $null = $g.Children.Add($ck)
+    $bra = [System.Windows.Controls.Button]::new(); $bra.Content = "Replace All"; $bra.Width = 100; $bra.Height = 28; $bra.Margin = [System.Windows.Thickness]::new(0,5,0,5)
+    [System.Windows.Controls.Grid]::SetRow($bra,2); [System.Windows.Controls.Grid]::SetColumn($bra,2); $null = $g.Children.Add($bra)
+    $bcx = [System.Windows.Controls.Button]::new(); $bcx.Content = "Cancel"; $bcx.Width = 100; $bcx.Height = 28; $bcx.IsCancel = $true; $bcx.Margin = [System.Windows.Thickness]::new(0,5,0,5)
+    [System.Windows.Controls.Grid]::SetRow($bcx,3); [System.Windows.Controls.Grid]::SetColumn($bcx,2); $null = $g.Children.Add($bcx)
     $d.Content = $g
     $bfn.Add_Click({ $null = DoFind $tFind.Text $ck.IsChecked })
     $brp.Add_Click({ $s = $tFind.Text; $r = $tRepl.Text; $mc = $ck.IsChecked; if ([string]::IsNullOrEmpty($s)) { return }; $sel = $script:UI.txtEditor.SelectedText; if ($sel.Length -gt 0) { $match = if ($mc) { $sel -ceq $s } else { $sel.Equals($s,[System.StringComparison]::OrdinalIgnoreCase) }; if ($match) { $script:UI.txtEditor.SelectedText = $r } }; $null = DoFind $s $mc })
@@ -306,23 +379,32 @@ function script:ShowReplaceDlg {
 #endregion
 #region ==================== FONT DIALOG ====================
 function script:ShowFontDlg {
-    $dlg = [System.Windows.Forms.FontDialog]::new(); $dlg.ShowColor = $false; $dlg.ShowEffects = $false; $dlg.MinSize = $script:MIN_FONT; $dlg.MaxSize = $script:MAX_FONT; $dlg.FontMustExist = $true; $dlg.AllowVerticalFonts = $false
+    $dlg = [System.Windows.Forms.FontDialog]::new(); $dlg.ShowColor = $false; $dlg.ShowEffects = $false
+    $dlg.MinSize = $script:MIN_FONT; $dlg.MaxSize = $script:MAX_FONT; $dlg.FontMustExist = $true; $dlg.AllowVerticalFonts = $false
     try { $pt = [Math]::Round($script:State.BaseFontSize * 72 / 96); $dlg.Font = [System.Drawing.Font]::new($script:UI.txtEditor.FontFamily.Source,[float]$pt) } catch { $dlg.Font = [System.Drawing.Font]::new($script:DEF_FONT_FAMILY,11) }
-    try { if ($dlg.ShowDialog() -eq "OK") { $script:UI.txtEditor.FontFamily = [System.Windows.Media.FontFamily]::new($dlg.Font.FontFamily.Name); $script:State.BaseFontSize = $dlg.Font.Size * 96 / 72; ApplyZoom } } finally { $dlg.Dispose() }
+    try { if ($dlg.ShowDialog() -eq "OK") { $script:UI.txtEditor.FontFamily = [System.Windows.Media.FontFamily]::new($dlg.Font.FontFamily.Name); $script:State.BaseFontSize = [double]($dlg.Font.Size * 96 / 72); ApplyZoom } } finally { $dlg.Dispose() }
 }
 #endregion
 #region ==================== EDITOR SETTINGS ====================
 function script:ShowEditorCfg {
-    $d = [System.Windows.Window]::new(); $d.Title = "Editor Settings"; $d.SizeToContent = "WidthAndHeight"; $d.WindowStartupLocation = "CenterOwner"; $d.Owner = $script:Window; $d.ResizeMode = "NoResize"; $d.ShowInTaskbar = $false; $d.WindowStyle = "SingleBorderWindow"; $d.Background = [System.Windows.Media.BrushConverter]::new().ConvertFrom($script:COLOR_CHROME)
+    $d = [System.Windows.Window]::new(); $d.Title = "Editor Settings"; $d.SizeToContent = "WidthAndHeight"
+    $d.WindowStartupLocation = "CenterOwner"; $d.Owner = $script:Window; $d.ResizeMode = "NoResize"
+    $d.ShowInTaskbar = $false; $d.WindowStyle = "SingleBorderWindow"
+    $d.Background = [System.Windows.Media.BrushConverter]::new().ConvertFrom($script:COLOR_CHROME)
     $outerBorder = [System.Windows.Controls.Border]::new(); $outerBorder.Padding = [System.Windows.Thickness]::new(14,12,14,12); $outerBorder.MinWidth = 290
-    $stack = [System.Windows.Controls.StackPanel]::new(); $curMargin = $script:UI.txtEditor.Margin; $curSpacing = GetLineSpacing
+    $stack = [System.Windows.Controls.StackPanel]::new()
+    $curMargin = $script:UI.txtEditor.Margin; $curSpacing = [double]$script:State.BaseLineSpacing
     $mgb = [System.Windows.Controls.GroupBox]::new(); $mgb.Header = " Margins (px) "; $mgb.Padding = [System.Windows.Thickness]::new(8,4,8,4); $mgb.Margin = [System.Windows.Thickness]::new(0,0,0,6); $mgb.FontSize = 11
     $mg = [System.Windows.Controls.Grid]::new(); $null = $mg.RowDefinitions.Add([System.Windows.Controls.RowDefinition]::new()); $null = $mg.RowDefinitions.Add([System.Windows.Controls.RowDefinition]::new())
     $mc0 = [System.Windows.Controls.ColumnDefinition]::new(); $mc0.Width = [System.Windows.GridLength]::new(45); $mc1 = [System.Windows.Controls.ColumnDefinition]::new(); $mc1.Width = [System.Windows.GridLength]::new(1,"Star"); $mg.ColumnDefinitions.Add($mc0); $mg.ColumnDefinitions.Add($mc1)
-    $llbl = [System.Windows.Controls.Label]::new(); $llbl.Content = "Left:"; $llbl.VerticalAlignment = "Center"; $llbl.FontSize = 11; $llbl.Padding = [System.Windows.Thickness]::new(0); [System.Windows.Controls.Grid]::SetRow($llbl,0); [System.Windows.Controls.Grid]::SetColumn($llbl,0); $null = $mg.Children.Add($llbl)
-    $tLeft = [System.Windows.Controls.TextBox]::new(); $tLeft.Width = 60; $tLeft.Height = 20; $tLeft.FontSize = 11; $tLeft.Margin = [System.Windows.Thickness]::new(0,2,0,2); $tLeft.HorizontalAlignment = "Left"; $tLeft.VerticalContentAlignment = "Center"; $tLeft.Padding = [System.Windows.Thickness]::new(3,0,3,0); $tLeft.Text = [string][int]$curMargin.Left; [System.Windows.Controls.Grid]::SetRow($tLeft,0); [System.Windows.Controls.Grid]::SetColumn($tLeft,1); $null = $mg.Children.Add($tLeft)
-    $rlbl = [System.Windows.Controls.Label]::new(); $rlbl.Content = "Right:"; $rlbl.VerticalAlignment = "Center"; $rlbl.FontSize = 11; $rlbl.Padding = [System.Windows.Thickness]::new(0); [System.Windows.Controls.Grid]::SetRow($rlbl,1); [System.Windows.Controls.Grid]::SetColumn($rlbl,0); $null = $mg.Children.Add($rlbl)
-    $tRight = [System.Windows.Controls.TextBox]::new(); $tRight.Width = 60; $tRight.Height = 20; $tRight.FontSize = 11; $tRight.Margin = [System.Windows.Thickness]::new(0,2,0,2); $tRight.HorizontalAlignment = "Left"; $tRight.VerticalContentAlignment = "Center"; $tRight.Padding = [System.Windows.Thickness]::new(3,0,3,0); $tRight.Text = [string][int]$curMargin.Right; [System.Windows.Controls.Grid]::SetRow($tRight,1); [System.Windows.Controls.Grid]::SetColumn($tRight,1); $null = $mg.Children.Add($tRight)
+    $llbl = [System.Windows.Controls.Label]::new(); $llbl.Content = "Left:"; $llbl.VerticalAlignment = "Center"; $llbl.FontSize = 11; $llbl.Padding = [System.Windows.Thickness]::new(0)
+    [System.Windows.Controls.Grid]::SetRow($llbl,0); [System.Windows.Controls.Grid]::SetColumn($llbl,0); $null = $mg.Children.Add($llbl)
+    $tLeft = [System.Windows.Controls.TextBox]::new(); $tLeft.Width = 60; $tLeft.Height = 20; $tLeft.FontSize = 11; $tLeft.Margin = [System.Windows.Thickness]::new(0,2,0,2); $tLeft.HorizontalAlignment = "Left"; $tLeft.VerticalContentAlignment = "Center"; $tLeft.Padding = [System.Windows.Thickness]::new(3,0,3,0); $tLeft.Text = [string][int]$curMargin.Left
+    [System.Windows.Controls.Grid]::SetRow($tLeft,0); [System.Windows.Controls.Grid]::SetColumn($tLeft,1); $null = $mg.Children.Add($tLeft)
+    $rlbl = [System.Windows.Controls.Label]::new(); $rlbl.Content = "Right:"; $rlbl.VerticalAlignment = "Center"; $rlbl.FontSize = 11; $rlbl.Padding = [System.Windows.Thickness]::new(0)
+    [System.Windows.Controls.Grid]::SetRow($rlbl,1); [System.Windows.Controls.Grid]::SetColumn($rlbl,0); $null = $mg.Children.Add($rlbl)
+    $tRight = [System.Windows.Controls.TextBox]::new(); $tRight.Width = 60; $tRight.Height = 20; $tRight.FontSize = 11; $tRight.Margin = [System.Windows.Thickness]::new(0,2,0,2); $tRight.HorizontalAlignment = "Left"; $tRight.VerticalContentAlignment = "Center"; $tRight.Padding = [System.Windows.Thickness]::new(3,0,3,0); $tRight.Text = [string][int]$curMargin.Right
+    [System.Windows.Controls.Grid]::SetRow($tRight,1); [System.Windows.Controls.Grid]::SetColumn($tRight,1); $null = $mg.Children.Add($tRight)
     $mgb.Content = $mg; $null = $stack.Children.Add($mgb)
     $sgb = [System.Windows.Controls.GroupBox]::new(); $sgb.Header = " Line Spacing ($script:MIN_SPACING - $script:MAX_SPACING) "; $sgb.Padding = [System.Windows.Thickness]::new(8,4,8,4); $sgb.Margin = [System.Windows.Thickness]::new(0,0,0,6); $sgb.FontSize = 11
     $sg = [System.Windows.Controls.StackPanel]::new(); $sg.Orientation = "Horizontal"
@@ -339,19 +421,21 @@ function script:ShowEditorCfg {
         $lv = ToInt $tLeft.Text -1; if ($lv -lt $script:MIN_MARGIN -or $lv -gt $script:MAX_MARGIN) { $null = [System.Windows.MessageBox]::Show("Left margin must be $script:MIN_MARGIN-$script:MAX_MARGIN.","Invalid","OK","Warning"); $null = $tLeft.Focus(); $tLeft.SelectAll(); return $false }
         $rv = ToInt $tRight.Text -1; if ($rv -lt $script:MIN_MARGIN -or $rv -gt $script:MAX_MARGIN) { $null = [System.Windows.MessageBox]::Show("Right margin must be $script:MIN_MARGIN-$script:MAX_MARGIN.","Invalid","OK","Warning"); $null = $tRight.Focus(); $tRight.SelectAll(); return $false }
         $sv = ToDouble $tSpace.Text -1; if ($sv -lt $script:MIN_SPACING -or $sv -gt $script:MAX_SPACING) { $null = [System.Windows.MessageBox]::Show("Line spacing must be $script:MIN_SPACING-$script:MAX_SPACING.","Invalid","OK","Warning"); $null = $tSpace.Focus(); $tSpace.SelectAll(); return $false }
-        $script:UI.txtEditor.Margin = [System.Windows.Thickness]::new($lv,0,$rv,0); SetLineSpacing $sv
+        $script:UI.txtEditor.Margin = [System.Windows.Thickness]::new($lv,0,$rv,0)
+        $script:State.BaseLineSpacing = [double]$sv; ApplyLineSpacingToEditor
         $script:Settings.Editor.MarginLeft = [string]$lv; $script:Settings.Editor.MarginRight = [string]$rv; $script:Settings.Editor.LineSpacing = $sv.ToString("F1"); return $true
     }
     $bApply.Add_Click({ $null = & $tryApply })
     $bOK.Add_Click({ if (& $tryApply) { $null = WriteIni $script:State.SettingsFile $script:Settings; $d.DialogResult = $true; $d.Close() } })
-    $restoreOriginal = { $script:UI.txtEditor.Margin = $origMargin; SetLineSpacing $origSpacing }
-    $bCancel.Add_Click({ & $restoreOriginal; $d.Close() }); $d.Add_Closing({ param($s,$e); if ($d.DialogResult -ne $true) { & $restoreOriginal } })
+    $restoreOriginal = { $script:UI.txtEditor.Margin = $origMargin; $script:State.BaseLineSpacing = [double]$origSpacing; ApplyLineSpacingToEditor }
+    $bCancel.Add_Click({ & $restoreOriginal; $d.Close() })
+    $d.Add_Closing({ param($s,$e); if ($d.DialogResult -ne $true) { & $restoreOriginal } })
     $null = $tLeft.Focus(); $tLeft.SelectAll(); $null = $d.ShowDialog()
 }
 #endregion
 #region ==================== ENCODING / EOL ====================
-function script:SetEncoding([string]$Name) { $script:State.Encoding = $Name; $script:State.IsModified = $true; $script:UI.txtEnc.Text = $Name; UpdateTitle }
-function script:SetLineEndingType([string]$Type) { $script:State.LineEnding = $Type; $script:State.IsModified = $true; $script:UI.txtEol.Text = EolDisplayLabel $Type; UpdateTitle }
+function script:SetEncoding([string]$Name) { $script:State.Encoding = $Name; $script:State.IsModified = $true; try { $script:UI.txtEnc.Text = $Name } catch {}; UpdateTitle }
+function script:SetLineEndingType([string]$Type) { $script:State.LineEnding = $Type; $script:State.IsModified = $true; try { $script:UI.txtEol.Text = EolDisplayLabel $Type } catch {}; UpdateTitle }
 #endregion
 #region ==================== VIEW ====================
 function script:SetWordWrap([bool]$On) { if ($On) { $script:UI.txtEditor.TextWrapping = "Wrap"; $script:UI.txtEditor.HorizontalScrollBarVisibility = "Disabled" } else { $script:UI.txtEditor.TextWrapping = "NoWrap"; $script:UI.txtEditor.HorizontalScrollBarVisibility = "Auto" } }
@@ -372,19 +456,26 @@ $script:UI.mnuEncUtf8.Add_Click({ SetEncoding "UTF-8 (no BOM)" }); $script:UI.mn
 $script:UI.mnuEncUtf16LE.Add_Click({ SetEncoding "UTF-16 LE (BOM)" }); $script:UI.mnuEncUtf16BE.Add_Click({ SetEncoding "UTF-16 BE (BOM)" })
 $script:UI.mnuStatusBar.Add_Checked({ SetStatusBar $true }); $script:UI.mnuStatusBar.Add_Unchecked({ SetStatusBar $false })
 $script:Window.Add_PreviewKeyDown({
-    param($sender,$e); $ctrl = ([System.Windows.Input.Keyboard]::Modifiers -band "Control") -ne 0; $shift = ([System.Windows.Input.Keyboard]::Modifiers -band "Shift") -ne 0
-    if ($ctrl -and -not $shift) { switch ($e.Key) { "N" { DoNew; $e.Handled = $true } "O" { DoOpen; $e.Handled = $true } "S" { $null = DoSave; $e.Handled = $true } "F" { ShowFindDlg; $e.Handled = $true } "H" { ShowReplaceDlg; $e.Handled = $true } "D0" { ZoomReset; $e.Handled = $true } "NumPad0" { ZoomReset; $e.Handled = $true } }; if ($e.Key -eq "OemPlus" -or $e.Key -eq "Add") { ZoomIn; $e.Handled = $true }; if ($e.Key -eq "OemMinus" -or $e.Key -eq "Subtract") { ZoomOut; $e.Handled = $true } }
-    elseif ($ctrl -and $shift) { if ($e.Key -eq "S") { $null = DoSaveAs; $e.Handled = $true }; if ($e.Key -eq "OemPlus" -or $e.Key -eq "Add") { ZoomIn; $e.Handled = $true } }
-    else { switch ($e.Key) { "F3" { DoFindNext; $e.Handled = $true } "F5" { $script:UI.txtEditor.SelectedText = (Get-Date).ToString("h:mm tt M/d/yyyy"); $e.Handled = $true } } }
+    param($sender,$e)
+    $ctrl = ([System.Windows.Input.Keyboard]::Modifiers -band "Control") -ne 0
+    $shift = ([System.Windows.Input.Keyboard]::Modifiers -band "Shift") -ne 0
+    if ($ctrl -and -not $shift) {
+        switch ($e.Key) { "N" { DoNew; $e.Handled = $true } "O" { DoOpen; $e.Handled = $true } "S" { $null = DoSave; $e.Handled = $true } "F" { ShowFindDlg; $e.Handled = $true } "H" { ShowReplaceDlg; $e.Handled = $true } "D0" { ZoomReset; $e.Handled = $true } "NumPad0" { ZoomReset; $e.Handled = $true } }
+        if ($e.Key -eq "OemPlus" -or $e.Key -eq "Add") { ZoomIn; $e.Handled = $true }
+        if ($e.Key -eq "OemMinus" -or $e.Key -eq "Subtract") { ZoomOut; $e.Handled = $true }
+    } elseif ($ctrl -and $shift) {
+        if ($e.Key -eq "S") { $null = DoSaveAs; $e.Handled = $true }
+        if ($e.Key -eq "OemPlus" -or $e.Key -eq "Add") { ZoomIn; $e.Handled = $true }
+    } else { switch ($e.Key) { "F3" { DoFindNext; $e.Handled = $true } "F5" { $script:UI.txtEditor.SelectedText = (Get-Date).ToString("h:mm tt M/d/yyyy"); $e.Handled = $true } } }
 })
 $script:UI.txtEditor.Add_PreviewMouseWheel({ param($sender,$e); if (([System.Windows.Input.Keyboard]::Modifiers -band "Control") -ne 0) { if ($e.Delta -gt 0) { ZoomIn } else { ZoomOut }; $e.Handled = $true } })
-$script:UI.txtEditor.Add_TextChanged({ $script:State.IsModified = $true; UpdateTitle; UpdateStatus })
-$script:UI.txtEditor.Add_SelectionChanged({ UpdateStatus })
+$script:UI.txtEditor.Add_TextChanged({ $script:State.IsModified = $true; UpdateTitle; RequestStatusUpdate })
+$script:UI.txtEditor.Add_SelectionChanged({ RequestStatusUpdate })
 $script:Window.Add_Loaded({ if ($script:UI.mnuWordWrap.IsChecked) { SetWordWrap $true }; SetStatusBar $script:UI.mnuStatusBar.IsChecked; UpdateTitle; UpdateStatusImmediate; UpdateZoomDisplay; UpdateZoomMenuState; $null = $script:UI.txtEditor.Focus() })
-$script:Window.Add_Closing({ param($sender,$e); if (-not (ConfirmSave)) { $e.Cancel = $true; return }; $script:StatusUpdateTimer.Stop(); SaveSettings })
+$script:Window.Add_Closing({ param($sender,$e); if (-not (ConfirmSave)) { $e.Cancel = $true; return }; try { $script:StatusUpdateTimer.Stop() } catch {}; SaveSettings })
 #endregion
 #region ==================== RUN ====================
 $null = $script:Window.ShowDialog()
-$script:StatusUpdateTimer.Stop(); $script:StatusUpdateTimer = $null
+try { $script:StatusUpdateTimer.Stop() } catch {}; $script:StatusUpdateTimer = $null
 $script:State = $null; $script:UI = $null; $script:Settings = $null; $script:Window = $null
 #endregion
