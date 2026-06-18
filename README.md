@@ -71,3 +71,53 @@ Just open your PowerShell terminal and call the script:
 ```powershell
 # Requires -Version 5.1
 .\notepad.ps1
+```
+---
+
+# Installation and Compilation Guide
+
+This guide will walk you through setting up the necessary tools and converting the PowerShell script into a standalone Windows executable (`.exe`) using the files provided in this repository.
+
+### 1. Install the PS2EXE Tool
+First, you need to install the module that handles the conversion. We use the `-Verbose` flag so you can see the installation progress details.
+
+1. Open **PowerShell** as an Administrator.
+2. Run the following command:
+
+```powershell
+Install-Module -Name ps2exe -Scope CurrentUser -Force -Verbose
+```
+*Note: If prompted to install 'NuGet provider' or 'Untrusted repository', type **Y** and press **Enter**.*
+
+---
+
+### 2. Extract the Notepad Icon
+To make the application look authentic, you need to generate the icon file from the system.
+
+1. Locate the file `Extract.Notepad.Icon.To.Desktop.ps1` in your downloaded folder.
+2. Right-click the file and select **Run with PowerShell**.
+3. A file named `notepad.ico` will be created on your Desktop. 
+4. **Move** that `notepad.ico` file into the same folder where `Notepad.ps1` is located.
+
+---
+
+### 3. Compile PS1 to EXE
+Now you will use the files `Notepad.ps1` and `notepad.ico` to create your final application.
+
+1. In your PowerShell window, navigate to the folder containing your files.
+2. Run the following command:
+
+```powershell
+ps2exe -InputFile ".\Notepad.ps1" -OutputFile ".\Notepad.exe" -IconFile ".\notepad.ico" -NoConsole -Title "Notepad" -Description "Text Editor" -Version "5.0.1"
+```
+
+### Breakdown of the Command:
+*   **-InputFile**: The source code (`Notepad.ps1`).
+*   **-OutputFile**: The name of the program to be created (`Notepad.exe`).
+*   **-IconFile**: Attaches the icon you extracted so the app looks like the real Notepad.
+*   **-NoConsole**: This prevents a black terminal window from appearing behind the editor.
+*   **-Version "5.0.1"**: Sets the file version to match the latest update.
+
+You will now have a functional **Notepad.exe** ready to use!
+
+
