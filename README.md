@@ -1,12 +1,10 @@
 # 📝 Notepad (PowerShell Edition)
 
-> "Because launching a massive IDE just to strip clipboard formatting is a minor life crisis you don't need."
-
 Welcome to **Notepad**, a text editor built entirely inside **PowerShell 5.1** using **WPF (Windows Presentation Foundation)**. It looks and acts exactly like the classic app you already know, but it runs completely out of your console. 
 
 No bloat, no tracking, just straight-up script-to-GUI magic.
 
-<img width="1330" height="965" alt="image" src="https://github.com/user-attachments/assets/17a0fff0-4726-4454-95b0-48741d355385" />
+<img width="931" height="676" alt="image" src="https://github.com/user-attachments/assets/17a0fff0-4726-4454-95b0-48741d355385" />
 
 
 ---
