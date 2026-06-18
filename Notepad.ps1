@@ -177,7 +177,18 @@ function script:UpdateZoomDisplay { try { $script:UI.txtZoom.Text = "$($script:S
         Title="Untitled - Notepad" WindowStartupLocation="CenterScreen" MinWidth="$script:MIN_WINDOW_W" MinHeight="$script:MIN_WINDOW_H" Background="$script:COLOR_CHROME">
     <Window.Resources>
         <Style TargetType="MenuItem"><Setter Property="Padding" Value="4,1"/><Setter Property="FontSize" Value="12"/></Style>
-        <Style x:Key="SBText" TargetType="TextBlock"><Setter Property="FontSize" Value="11"/><Setter Property="FontWeight" Value="Normal"/><Setter Property="Foreground" Value="#444444"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+        <Style x:Key="SBText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="Normal"/>
+            <Setter Property="Foreground" Value="#444444"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="SBSep" TargetType="Rectangle">
+            <Setter Property="Width" Value="1"/>
+            <Setter Property="Height" Value="14"/>
+            <Setter Property="Fill" Value="#AAAAAA"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
     </Window.Resources>
     <DockPanel>
         <Border DockPanel.Dock="Top" BorderBrush="#B0B0B0" BorderThickness="0,0,0,1"><Border BorderBrush="#E8E8E8" BorderThickness="0,0,0,1">
@@ -211,19 +222,60 @@ function script:UpdateZoomDisplay { try { $script:UI.txtZoom.Text = "$($script:S
         <Border DockPanel.Dock="Bottom" Name="statusBorder" BorderBrush="#808080" BorderThickness="0,1,0,0"><Border BorderBrush="#DFDFDF" BorderThickness="0,1,0,0">
             <StatusBar Name="statusBar" Background="#E8E8E8" Padding="6,1" Height="22">
                 <StatusBar.ItemsPanel><ItemsPanelTemplate><DockPanel LastChildFill="False"/></ItemsPanelTemplate></StatusBar.ItemsPanel>
-                <StatusBarItem DockPanel.Dock="Right" Margin="8,0,6,0"><TextBlock Name="txtEnc" Text="UTF-8" Style="{StaticResource SBText}"/></StatusBarItem>
-                <StatusBarItem DockPanel.Dock="Right" Margin="0,4,0,4"><Rectangle Width="1" Fill="#AAAAAA" VerticalAlignment="Stretch"/></StatusBarItem>
-                <StatusBarItem DockPanel.Dock="Right" Margin="8,0,8,0"><TextBlock Name="txtEol" Text="Windows (CRLF)" Style="{StaticResource SBText}"/></StatusBarItem>
-                <StatusBarItem DockPanel.Dock="Right" Margin="0,4,0,4"><Rectangle Width="1" Fill="#AAAAAA" VerticalAlignment="Stretch"/></StatusBarItem>
-                <StatusBarItem DockPanel.Dock="Right" Margin="8,0,8,0"><TextBlock Name="txtZoom" Text="100%" Style="{StaticResource SBText}"/></StatusBarItem>
-                <StatusBarItem DockPanel.Dock="Right" Margin="0,4,0,4"><Rectangle Width="1" Fill="#AAAAAA" VerticalAlignment="Stretch"/></StatusBarItem>
-                <StatusBarItem DockPanel.Dock="Right" Margin="8,0,8,0"><TextBlock Name="txtLines" Text="Lines: 1" Style="{StaticResource SBText}"/></StatusBarItem>
-                <StatusBarItem DockPanel.Dock="Right" Margin="0,4,0,4"><Rectangle Width="1" Fill="#AAAAAA" VerticalAlignment="Stretch"/></StatusBarItem>
-                <StatusBarItem DockPanel.Dock="Right" Margin="8,0,8,0"><TextBlock Name="txtChars" Text="Chars: 0" Style="{StaticResource SBText}"/></StatusBarItem>
-                <StatusBarItem DockPanel.Dock="Right" Margin="0,4,0,4"><Rectangle Width="1" Fill="#AAAAAA" VerticalAlignment="Stretch"/></StatusBarItem>
-                <StatusBarItem DockPanel.Dock="Right" Margin="8,0,8,0"><TextBlock Name="txtWords" Text="Words: 0" Style="{StaticResource SBText}"/></StatusBarItem>
-                <StatusBarItem DockPanel.Dock="Right" Margin="0,4,0,4"><Rectangle Width="1" Fill="#AAAAAA" VerticalAlignment="Stretch"/></StatusBarItem>
-                <StatusBarItem DockPanel.Dock="Right" Margin="6,0,8,0"><TextBlock Name="txtPos" Text="Ln 1, Col 1" Style="{StaticResource SBText}"/></StatusBarItem>
+
+                <!-- Encoding -->
+                <StatusBarItem DockPanel.Dock="Right" Padding="8,0">
+                    <TextBlock Name="txtEnc" Text="UTF-8" Style="{StaticResource SBText}"/>
+                </StatusBarItem>
+                <StatusBarItem DockPanel.Dock="Right" Padding="0">
+                    <Rectangle Style="{StaticResource SBSep}"/>
+                </StatusBarItem>
+
+                <!-- Line ending -->
+                <StatusBarItem DockPanel.Dock="Right" Padding="8,0">
+                    <TextBlock Name="txtEol" Text="Windows (CRLF)" Style="{StaticResource SBText}"/>
+                </StatusBarItem>
+                <StatusBarItem DockPanel.Dock="Right" Padding="0">
+                    <Rectangle Style="{StaticResource SBSep}"/>
+                </StatusBarItem>
+
+                <!-- Zoom -->
+                <StatusBarItem DockPanel.Dock="Right" Padding="8,0">
+                    <TextBlock Name="txtZoom" Text="100%" Style="{StaticResource SBText}"/>
+                </StatusBarItem>
+                <StatusBarItem DockPanel.Dock="Right" Padding="0">
+                    <Rectangle Style="{StaticResource SBSep}"/>
+                </StatusBarItem>
+
+                <!-- Line count -->
+                <StatusBarItem DockPanel.Dock="Right" Padding="8,0">
+                    <TextBlock Name="txtLines" Text="Lines: 1" Style="{StaticResource SBText}"/>
+                </StatusBarItem>
+                <StatusBarItem DockPanel.Dock="Right" Padding="0">
+                    <Rectangle Style="{StaticResource SBSep}"/>
+                </StatusBarItem>
+
+                <!-- Character count -->
+                <StatusBarItem DockPanel.Dock="Right" Padding="8,0">
+                    <TextBlock Name="txtChars" Text="Chars: 0" Style="{StaticResource SBText}"/>
+                </StatusBarItem>
+                <StatusBarItem DockPanel.Dock="Right" Padding="0">
+                    <Rectangle Style="{StaticResource SBSep}"/>
+                </StatusBarItem>
+
+                <!-- Word count -->
+                <StatusBarItem DockPanel.Dock="Right" Padding="8,0">
+                    <TextBlock Name="txtWords" Text="Words: 0" Style="{StaticResource SBText}"/>
+                </StatusBarItem>
+                <StatusBarItem DockPanel.Dock="Right" Padding="0">
+                    <Rectangle Style="{StaticResource SBSep}"/>
+                </StatusBarItem>
+
+                <!-- Caret position (leftmost of the right-docked items) -->
+                <StatusBarItem DockPanel.Dock="Right" Padding="8,0,10,0">
+                    <TextBlock Name="txtPos" Text="Ln 1, Col 1" Style="{StaticResource SBText}"/>
+                </StatusBarItem>
+
             </StatusBar></Border></Border>
         <Border Background="$script:COLOR_CHROME"><TextBox Name="txtEditor" AcceptsReturn="True" AcceptsTab="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" BorderThickness="0" Background="$script:COLOR_EDITOR_BG" Foreground="$script:COLOR_EDITOR_FG" Padding="8,6" UndoLimit="1000" IsUndoEnabled="True"/></Border>
     </DockPanel>
