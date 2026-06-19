@@ -17,7 +17,6 @@ No bloat, no tracking, just straight-up script-to-GUI magic.
 ## 🔥 Why Does It Exist?
 
 * **Testing the Limits:** To prove that PowerShell isn't just for automating background tasks or changing registry keys. It can build real, responsive desktop apps.
-* **The Anti-Electron Movement:** Modern text editors often eat up hundreds of megabytes of RAM just to run an entire web browser background environment. This script uses the lightweight .NET framework already built into your operating system.
 * **The Perfect SysAdmin Tool:** If you are remoted into a locked-down server and need to quickly check logs or edit a config file, you don't want to install untrusted executables. This script gives you a full GUI using only the native tools already on the machine.
 
 ---
