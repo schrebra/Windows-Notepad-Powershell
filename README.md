@@ -4,7 +4,8 @@ Welcome to **Notepad**, a text editor built entirely inside **PowerShell 5.1** u
 
 No bloat, no tracking, just straight-up script-to-GUI magic.
 
-<img width="60%" alt="image" src="https://github.com/user-attachments/assets/8ac551a9-9585-41ad-8313-c3f6c29cd3d8" />
+<img width="45%" alt="image" src="https://github.com/user-attachments/assets/8ac551a9-9585-41ad-8313-c3f6c29cd3d8" />
+<img width="45%" alt="image" src="https://github.com/user-attachments/assets/b4cc205a-6c14-4f5c-97ef-abbeec0b63da" />
 
 ---
 
